@@ -1,0 +1,46 @@
+# LinkedIn AI Agent — API Requests
+# Install "REST Client" extension in VS Code, then click "Send Request" above each block
+
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZTAwMWE0MS0yNjg5LTQ0OWYtOWUzMy03NzBlMGM0MWJjYjEiLCJleHAiOjE3Nzk2NDM0MjZ9.LniSZ_ageprqdfhZZMK5cjCraEfKm6YEZ3mPAezTHus
+
+### Health check
+GET http://localhost:8000/health
+
+### Ask the agent what to post
+POST http://localhost:8000/agent/chat
+Content-Type: application/json
+
+{
+  "token": "{{token}}",
+  "message": "What should I post about this week?"
+}
+
+### Tell agent your career goals (it will save to memory)
+POST http://localhost:8000/agent/chat
+Content-Type: application/json
+
+{
+  "token": "{{token}}",
+  "message": "My goal is to land a Senior AI Engineer role at a GenAI startup in the next 12 months"
+}
+
+### Ask for a full post draft
+POST http://localhost:8000/agent/chat
+Content-Type: application/json
+
+{
+  "token": "{{token}}",
+  "message": "Write me a full LinkedIn post about my experience building GenAI automation tools at ADP"
+}
+
+### Ask for profile advice
+POST http://localhost:8000/agent/chat
+Content-Type: application/json
+
+{
+  "token": "{{token}}",
+  "message": "Analyze my LinkedIn profile and tell me the top 3 things to fix"
+}
+
+### View my LinkedIn profile
+GET http://localhost:8000/profile/me?token={{token}}
