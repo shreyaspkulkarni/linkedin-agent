@@ -57,6 +57,35 @@ export async function getProfile() {
   return data;
 }
 
+export async function getProfileData() {
+  const { data } = await API.get("/profile/data", {
+    params: { token: getToken() },
+  });
+  return data as { headline: string; about: string; experience: string; skills: string; updated_at?: string };
+}
+
+export async function saveProfileData(payload: {
+  headline: string;
+  about: string;
+  experience: string;
+  skills: string;
+}) {
+  const { data } = await API.post("/profile/data", {
+    token: getToken(),
+    ...payload,
+  });
+  return data;
+}
+
+export async function importLinkedInExport(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await API.post(`/profile/import?token=${getToken()}`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data as { message: string; headline: string; positions_imported: number; skills_imported: number };
+}
+
 export async function getAnalytics() {
   const { data } = await API.get("/posts/analytics", {
     params: { token: getToken() },

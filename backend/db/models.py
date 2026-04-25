@@ -23,6 +23,7 @@ class User(Base):
     memory = relationship("UserMemory", back_populates="user", cascade="all, delete")
     posts = relationship("Post", back_populates="user", cascade="all, delete")
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete")
+    linkedin_profile = relationship("LinkedInProfile", back_populates="user", uselist=False, cascade="all, delete")
 
 
 class UserMemory(Base):
@@ -51,6 +52,20 @@ class Post(Base):
 
     user = relationship("User", back_populates="posts")
     analytics = relationship("Analytics", back_populates="post", cascade="all, delete")
+
+
+class LinkedInProfile(Base):
+    __tablename__ = "linkedin_profiles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), unique=True, nullable=False)
+    headline = Column(Text, default="")
+    about = Column(Text, default="")
+    experience = Column(Text, default="")  # free-form: paste your bullets
+    skills = Column(Text, default="")      # comma-separated
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="linkedin_profile")
 
 
 class Analytics(Base):

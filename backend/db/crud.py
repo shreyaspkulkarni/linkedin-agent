@@ -3,7 +3,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from backend.db.models import Analytics, Post, User, UserMemory
+from backend.db.models import Analytics, LinkedInProfile, Post, User, UserMemory
 
 
 def get_user_by_linkedin_id(db: Session, linkedin_id: str) -> User | None:
@@ -59,6 +59,34 @@ def set_memory(db: Session, user_id, key: str, value: str) -> UserMemory:
 def get_all_memory(db: Session, user_id) -> dict:
     records = db.query(UserMemory).filter(UserMemory.user_id == user_id).all()
     return {r.key: r.value for r in records}
+
+
+def get_linkedin_profile_data(db: Session, user_id) -> LinkedInProfile | None:
+    return db.query(LinkedInProfile).filter(LinkedInProfile.user_id == user_id).first()
+
+
+def save_linkedin_profile_data(
+    db: Session, user_id, headline: str, about: str, experience: str, skills: str
+) -> LinkedInProfile:
+    record = db.query(LinkedInProfile).filter(LinkedInProfile.user_id == user_id).first()
+    if record:
+        record.headline = headline
+        record.about = about
+        record.experience = experience
+        record.skills = skills
+        record.updated_at = datetime.utcnow()
+    else:
+        record = LinkedInProfile(
+            user_id=user_id,
+            headline=headline,
+            about=about,
+            experience=experience,
+            skills=skills,
+        )
+        db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
 
 
 def get_published_posts(db: Session, user_id, limit: int = 20) -> list[Post]:

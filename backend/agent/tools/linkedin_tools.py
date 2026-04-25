@@ -7,7 +7,7 @@ from langgraph.prebuilt import InjectedState
 from sqlalchemy.orm import Session
 
 from backend.config import settings
-from backend.db.crud import get_all_memory
+from backend.db.crud import get_all_memory, get_linkedin_profile_data
 from backend.db.database import SessionLocal
 from backend.db.models import User
 from backend.linkedin.client import LinkedInClient
@@ -42,28 +42,38 @@ async def get_linkedin_profile(state: Annotated[dict, InjectedState]) -> str:
 
 @tool
 async def analyze_profile(
-    profile_sections: str,
     state: Annotated[dict, InjectedState],
 ) -> str:
     """
     Audit the user's LinkedIn profile against their career goals and return a
-    prioritized, section-by-section improvement plan. Use this when the user asks
-    to audit, review, or improve their LinkedIn profile.
-
-    IMPORTANT: Before calling this tool, ask the user to share the text of their:
-    1. Current headline
-    2. About / summary section
-    3. Top 2-3 experience bullet points (most recent role)
-    Then call this tool with everything they share as profile_sections.
-
-    Args:
-        profile_sections: raw text the user shared — headline, about section,
-                          experience bullets, or any LinkedIn profile content
+    prioritized, section-by-section improvement plan with specific rewrites.
+    Use this when the user asks to audit, review, or improve their LinkedIn profile.
+    This tool automatically fetches their stored profile — no need to ask them to paste anything.
     """
     user_id = state["user_id"]
     db: Session = SessionLocal()
     try:
         memory = get_all_memory(db, user_id)
+        stored_profile = get_linkedin_profile_data(db, user_id)
+
+        if not stored_profile or not stored_profile.headline:
+            return (
+                "I don't have your LinkedIn profile stored yet. "
+                "Go to the Profile page in the app, fill in your headline, about section, "
+                "experience, and skills, then come back and I'll run the full audit."
+            )
+
+        profile_sections = f"""
+Headline: {stored_profile.headline}
+
+About:
+{stored_profile.about}
+
+Experience:
+{stored_profile.experience}
+
+Skills: {stored_profile.skills}
+""".strip()
 
         profile_best_practices = query_documents(KNOWLEDGE_COLLECTION, "LinkedIn profile optimization headline about section", n_results=4)
         best_practices_str = "\n\n".join(profile_best_practices) if profile_best_practices else ""
