@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getDrafts, publishPost, schedulePost, getToken } from "@/lib/api";
+import { getDrafts, getToken } from "@/lib/api";
 import Link from "next/link";
 
 type Draft = { id: string; content: string; created_at: string };
@@ -11,36 +11,12 @@ export default function DraftsPage() {
   const router = useRouter();
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [loading, setLoading] = useState(true);
-  const [schedulingId, setSchedulingId] = useState<string | null>(null);
-  const [scheduleDate, setScheduleDate] = useState("");
-  const [statusMsg, setStatusMsg] = useState<{ id: string; msg: string } | null>(null);
 
   useEffect(() => {
     if (!getToken()) { router.push("/"); return; }
     getDrafts().then(setDrafts).finally(() => setLoading(false));
   }, [router]);
 
-  async function handlePublish(id: string) {
-    try {
-      await publishPost(id);
-      setStatusMsg({ id, msg: "Published to LinkedIn!" });
-      setDrafts((d) => d.filter((p) => p.id !== id));
-    } catch {
-      setStatusMsg({ id, msg: "Failed to publish. Try again." });
-    }
-  }
-
-  async function handleSchedule(id: string) {
-    if (!scheduleDate) return;
-    try {
-      await schedulePost(id, scheduleDate);
-      setStatusMsg({ id, msg: `Scheduled for ${new Date(scheduleDate).toLocaleString()}` });
-      setDrafts((d) => d.filter((p) => p.id !== id));
-      setSchedulingId(null);
-    } catch {
-      setStatusMsg({ id, msg: "Failed to schedule. Try again." });
-    }
-  }
 
   return (
     <div className="min-h-screen">
@@ -75,41 +51,10 @@ export default function DraftsPage() {
                 Created {new Date(draft.created_at).toLocaleDateString()}
               </p>
 
-              {statusMsg?.id === draft.id && (
-                <p className="mb-3 text-sm text-green-400">{statusMsg.msg}</p>
-              )}
 
-              <div className="flex flex-wrap gap-3">
-                <button
-                  onClick={() => handlePublish(draft.id)}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 transition"
-                >
-                  Publish Now
-                </button>
-                <button
-                  onClick={() => setSchedulingId(schedulingId === draft.id ? null : draft.id)}
-                  className="rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-300 hover:border-gray-500 transition"
-                >
-                  Schedule
-                </button>
-              </div>
-
-              {schedulingId === draft.id && (
-                <div className="mt-4 flex gap-3">
-                  <input
-                    type="datetime-local"
-                    value={scheduleDate}
-                    onChange={(e) => setScheduleDate(e.target.value)}
-                    className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-                  />
-                  <button
-                    onClick={() => handleSchedule(draft.id)}
-                    className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-500 transition"
-                  >
-                    Confirm
-                  </button>
-                </div>
-              )}
+              <p className="text-xs text-gray-600 italic">
+                Publishing is disabled in the demo — copy the draft and post it manually on LinkedIn.
+              </p>
             </div>
           ))}
         </div>
