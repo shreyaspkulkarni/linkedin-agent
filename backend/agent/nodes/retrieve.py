@@ -1,5 +1,11 @@
 from backend.agent.state import AgentState
-from backend.rag.vector_store import KNOWLEDGE_COLLECTION, USER_POSTS_COLLECTION, USER_PROFILE_COLLECTION, query_documents
+from backend.rag.vector_store import (
+    KNOWLEDGE_COLLECTION,
+    LINKEDIN_EXAMPLES_COLLECTION,
+    USER_POSTS_COLLECTION,
+    USER_PROFILE_COLLECTION,
+    query_documents,
+)
 
 
 def retrieve_node(state: AgentState) -> dict:
@@ -18,5 +24,6 @@ def retrieve_node(state: AgentState) -> dict:
     kb_results = query_documents(KNOWLEDGE_COLLECTION, query, n_results=3)
     post_results = query_documents(USER_POSTS_COLLECTION, query, n_results=2)
     profile_results = query_documents(USER_PROFILE_COLLECTION, query, n_results=2)
+    example_results = query_documents(LINKEDIN_EXAMPLES_COLLECTION, query, n_results=3)
 
-    return {"retrieved_context": kb_results + post_results + profile_results}
+    return {"retrieved_context": kb_results + post_results + profile_results + example_results}

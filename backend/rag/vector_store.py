@@ -6,6 +6,7 @@ from backend.rag.embeddings import embed_text, embed_texts
 KNOWLEDGE_COLLECTION = "linkedin_knowledge"
 USER_POSTS_COLLECTION = "user_posts"
 USER_PROFILE_COLLECTION = "user_profile"
+LINKEDIN_EXAMPLES_COLLECTION = "linkedin_examples"
 
 
 def _get_index():
