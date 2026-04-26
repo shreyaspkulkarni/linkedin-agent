@@ -29,33 +29,40 @@ For a project shown to recruiters, LangGraph is the more recognizable choice.
 PostgreSQL stores structured facts (career goals, post history, analytics).
 RAG stores *semantic knowledge* — what the agent retrieves based on meaning.
 
-Two ChromaDB collections:
-1. **`linkedin_knowledge`** — curated best practices for tech/AI engineers on LinkedIn (15 chunks, ingested at startup)
-2. **`user_posts`** — your published posts embedded over time so the agent learns your voice and what works for your audience
+Four Pinecone namespaces:
+1. **`linkedin_knowledge`** — curated LinkedIn best practices for tech/AI engineers (15 chunks)
+2. **`user_posts`** — your published posts embedded over time (agent learns your voice)
+3. **`user_profile`** — your stored profile sections (headline, about, experience, skills)
+4. **`linkedin_examples`** — 119 real high-performing LinkedIn posts with engagement metrics (NeuML dataset)
 
 ---
 
 ## System Architecture (as built)
 
 ```
-Next.js Frontend (localhost:3000)
+Next.js Frontend (Vercel — linkedin-agent-blue.vercel.app)
     │
-    │  HTTP via axios
+    │  HTTPS via axios
     ▼
-FastAPI Backend (localhost:8000)
+FastAPI Backend (AWS EC2 — https://3.80.255.79.nip.io)
+    │  nginx reverse proxy + Let's Encrypt SSL
+    │  systemd service (linkedin-agent.service)
     │
     ├── /auth/login          → LinkedIn OAuth redirect
     ├── /auth/callback       → exchange code, store user, redirect to frontend
     ├── /agent/chat          → runs the LangGraph agent
+    ├── /agent/conversations → DELETE to clear conversation history
     ├── /posts/drafts        → list saved drafts
     ├── /posts/publish/{id}  → user-triggered publish to LinkedIn
     ├── /posts/schedule      → user-triggered schedule
-    └── /profile/me          → live LinkedIn profile data
+    ├── /profile/me          → live LinkedIn profile data
+    ├── /profile/data        → GET/POST stored profile sections
+    └── /profile/import      → POST LinkedIn ZIP export (Profile.csv + Positions.csv + Skills.csv)
     │
     ▼
 LangGraph Agent Graph
     │
-    ├── [retrieve] node  → searches ChromaDB (linkedin_knowledge + user_posts)
+    ├── [retrieve] node  → searches Pinecone (4 namespaces: kb + user_posts + user_profile + examples)
     │                      injects top-k chunks into state
     ├── [agent] node     → Claude sonnet-4-6 reasons over messages + RAG context
     │                      + PostgreSQL memory (career goals, preferences)
@@ -65,11 +72,15 @@ LangGraph Agent Graph
     │
     ▼
 Agent Tools (what Claude can call)
-    ├── get_memory()              → loads user goals/prefs from PostgreSQL
-    ├── save_memory(key, value)   → persists new context to PostgreSQL
-    ├── get_linkedin_profile()    → fetches live profile via LinkedIn API
-    ├── draft_post(topic, format) → RAG-informed post draft, saved as DB draft
-    └── search_trends(query)      → Tavily web search [Phase 6]
+    ├── get_memory()                   → loads user goals/prefs from PostgreSQL
+    ├── save_memory(key, value)        → persists new context to PostgreSQL
+    ├── get_my_linkedin_profile()      → fetches live profile via LinkedIn API
+    ├── get_my_posts()                 → fetches post history + analytics from DB
+    ├── draft_post(topic, format)      → RAG-informed post draft, saved as DB draft
+    ├── publish_post(post_id)          → posts to LinkedIn via Share API
+    ├── schedule_post(post_id, time)   → queues post for future publishing
+    ├── search_trends(query)           → Tavily web search for trending topics
+    └── analyze_profile()              → auto-fetches stored profile, full audit + rewrite suggestions
 
 User-controlled endpoints (NOT agent tools — user decides)
     ├── POST /posts/publish/{id}  → publishes a saved draft to LinkedIn
@@ -78,11 +89,11 @@ User-controlled endpoints (NOT agent tools — user decides)
     ▼
 External Services
     ├── LinkedIn API    → profile read + post publishing
-    ├── ChromaDB        → local vector store (./chroma_db on disk)
-    ├── PostgreSQL      → structured data (Docker container)
+    ├── Pinecone        → serverless vector store (4 namespaces, cloud-hosted)
+    ├── AWS RDS         → PostgreSQL (db.t3.micro, us-east-1)
     ├── OpenAI API      → text-embedding-3-small for embeddings
     ├── Anthropic API   → Claude sonnet-4-6 as agent brain
-    └── Tavily API      → web search for trends [Phase 6]
+    └── Tavily API      → web search for trends
 ```
 
 ---
@@ -101,6 +112,8 @@ class AgentState(TypedDict):
 
 **Conversation history:** Last 10 turns loaded from `conversations` table on every request so the agent has full context without needing LangGraph checkpointing.
 
+**New Conversation:** `DELETE /agent/conversations` clears DB history so the agent starts fresh (avoids stale cached audit results in context).
+
 ---
 
 ## RAG Pipeline (as implemented)
@@ -110,14 +123,29 @@ Startup:
   linkedin_best_practices.md
         ↓ chunk (500 chars, 50 overlap)
         ↓ embed (OpenAI text-embedding-3-small)
-        ↓ store → ChromaDB "linkedin_knowledge" (15 chunks)
+        ↓ store → Pinecone "linkedin_knowledge" (15 chunks)
+
+One-time seed:
+  NeuML/neuml-linkedin-202501 (HuggingFace dataset)
+        ↓ filter: >=5 likes, >=400 impressions, >=4% engagement rate
+        ↓ sort by engagement rate descending, top 150
+        ↓ format with engagement tier label [VIRAL / HIGH / SOLID]
+        ↓ embed + store → Pinecone "linkedin_examples" (119 posts)
 
 On every /agent/chat request:
-  user message → embed → cosine similarity search
+  user message → embed → cosine similarity search across all 4 namespaces
         ↓
-  top 3 from "linkedin_knowledge" + top 2 from "user_posts"
+  top 3 from "linkedin_knowledge"
+  + top 2 from "user_posts"
+  + top 2 from "user_profile"
+  + top 3 from "linkedin_examples"
         ↓
   injected into Claude's context before reasoning
+
+On /profile/data POST:
+  profile sections (headline, about, experience, skills)
+        ↓ save to RDS linkedin_profiles table
+        ↓ embed → store in Pinecone "user_profile"
 
 On post publish:
   post content → embed → store in "user_posts"
@@ -130,14 +158,15 @@ On post publish:
 
 ```
 Next.js 16 + TypeScript + Tailwind CSS
-Node.js 22 (via nvm)
+Node.js 22 (nvm alias default 22)
+Deployed on Vercel
 
 Pages:
   /                   → Login page (LinkedIn OAuth button)
   /auth/callback      → Stores JWT token, redirects to /chat
-  /chat               → Chat interface with the agent
+  /chat               → Chat interface with agent + "New conversation" button
   /drafts             → Review drafts, publish now or schedule
-  /profile            → LinkedIn profile + AI audit
+  /profile            → Profile form (headline/about/experience/skills) + ZIP import + AI audit
 
 Auth flow:
   Frontend → /auth/login (backend) → LinkedIn → /auth/callback (backend)
@@ -158,6 +187,32 @@ user_memory         → key/value store for agent's persistent memory
 posts               → drafts / scheduled / published posts
 analytics           → likes, comments, shares, impressions per post
 conversations       → full chat history (role + content + tool_calls)
+linkedin_profiles   → stored profile sections (headline, about, experience, skills)
+```
+
+---
+
+## Infrastructure (as deployed)
+
+```
+AWS EC2 (t2.micro, Ubuntu 24.04 LTS, us-east-1)
+  - IP: 3.80.255.79
+  - DNS: 3.80.255.79.nip.io (free wildcard DNS)
+  - SSL: Let's Encrypt via certbot
+  - Reverse proxy: nginx (proxy_read_timeout 300s for long AI calls)
+  - Process manager: systemd (linkedin-agent.service)
+  - Python: uv + venv
+
+AWS RDS (db.t3.micro, PostgreSQL 16, us-east-1)
+  - Private VPC, security group allows EC2 inbound on 5432
+
+Pinecone (serverless, us-east-1-aws)
+  - Index: linkedin-agent
+  - Namespaces: linkedin_knowledge, user_posts, user_profile, linkedin_examples
+
+Vercel (frontend)
+  - Auto-deploys from GitHub main branch
+  - NEXT_PUBLIC_API_URL=https://3.80.255.79.nip.io
 ```
 
 ---
@@ -167,58 +222,58 @@ conversations       → full chat history (role + content + tool_calls)
 ```
 linkedin-agent/
 ├── backend/
-│   ├── main.py                     # FastAPI app + router registration
-│   ├── config.py                   # Pydantic settings from .env
+│   ├── main.py                          # FastAPI app + router registration
+│   ├── config.py                        # Pydantic settings from .env
 │   ├── agent/
-│   │   ├── graph.py                # LangGraph graph (retrieve→agent→tools)
-│   │   ├── state.py                # AgentState TypedDict
-│   │   ├── prompts.py              # System prompt defining agent personality
+│   │   ├── graph.py                     # LangGraph graph (retrieve→agent→tools)
+│   │   ├── state.py                     # AgentState TypedDict
+│   │   ├── prompts.py                   # System prompt defining agent personality
 │   │   ├── nodes/
-│   │   │   ├── retrieve.py         # RAG retrieval node
-│   │   │   ├── agent.py            # Claude reasoning node + tool binding
-│   │   │   └── tools.py            # ToolNode (LangGraph prebuilt)
+│   │   │   ├── retrieve.py              # RAG retrieval node (4 Pinecone namespaces)
+│   │   │   ├── agent.py                 # Claude reasoning node + tool binding
+│   │   │   └── tools.py                 # ToolNode (LangGraph prebuilt)
 │   │   └── tools/
-│   │       ├── memory_tools.py     # save_memory, get_memory
-│   │       ├── linkedin_tools.py   # get_linkedin_profile
-│   │       ├── content_tools.py    # draft_post
-│   │       └── search_tools.py     # search_trends [Phase 6]
+│   │       ├── memory_tools.py          # save_memory, get_memory
+│   │       ├── linkedin_tools.py        # get_my_linkedin_profile, get_my_posts, analyze_profile
+│   │       ├── content_tools.py         # draft_post, publish_post, schedule_post
+│   │       └── search_tools.py          # search_trends (Tavily)
 │   ├── rag/
-│   │   ├── vector_store.py         # ChromaDB client + query helpers
-│   │   ├── embeddings.py           # OpenAI embedding function
-│   │   ├── ingestion.py            # Knowledge base loader + ingest_user_post()
+│   │   ├── vector_store.py              # Pinecone client + query/upsert helpers (4 namespaces)
+│   │   ├── embeddings.py                # OpenAI text-embedding-3-small
+│   │   ├── ingestion.py                 # KB loader + ingest_user_post() + ingest_user_profile()
+│   │   ├── seed_linkedin_examples.py    # One-time seed: NeuML dataset → linkedin_examples
 │   │   └── knowledge/
 │   │       └── linkedin_best_practices.md
 │   ├── api/routes/
-│   │   ├── auth.py                 # OAuth login + callback
-│   │   ├── agent.py                # POST /agent/chat
-│   │   ├── posts.py                # drafts, publish, schedule, published
-│   │   └── profile.py              # GET /profile/me
+│   │   ├── auth.py                      # OAuth login + callback
+│   │   ├── agent.py                     # POST /agent/chat, DELETE /agent/conversations
+│   │   ├── posts.py                     # drafts, publish, schedule, published
+│   │   └── profile.py                   # /profile/me, /profile/data, /profile/import
 │   ├── linkedin/
-│   │   ├── auth.py                 # OAuth URL generation + token exchange
-│   │   └── client.py               # LinkedIn API wrapper
+│   │   ├── auth.py                      # OAuth URL generation + token exchange
+│   │   └── client.py                    # LinkedIn API wrapper
 │   └── db/
-│       ├── database.py             # SQLAlchemy engine + session
-│       ├── models.py               # All DB models
-│       └── crud.py                 # DB operations
+│       ├── database.py                  # SQLAlchemy engine + session
+│       ├── models.py                    # All DB models (incl. LinkedInProfile)
+│       └── crud.py                      # DB operations
 │
 ├── frontend/
 │   ├── app/
-│   │   ├── layout.tsx              # Root layout (dark theme)
-│   │   ├── page.tsx                # Login page
-│   │   ├── auth/callback/page.tsx  # Token handler
-│   │   ├── chat/page.tsx           # Agent chat UI
-│   │   ├── drafts/page.tsx         # Draft review + publish/schedule
-│   │   └── profile/page.tsx        # Profile + AI audit
+│   │   ├── layout.tsx                   # Root layout (dark theme)
+│   │   ├── page.tsx                     # Login page
+│   │   ├── auth/callback/page.tsx       # Token handler
+│   │   ├── chat/page.tsx                # Agent chat UI + New conversation button
+│   │   ├── drafts/page.tsx              # Draft review + publish/schedule
+│   │   └── profile/page.tsx             # Profile form + ZIP import + AI audit
 │   ├── lib/
-│   │   └── api.ts                  # All backend API calls
-│   └── .env.local                  # NEXT_PUBLIC_API_URL
+│   │   └── api.ts                       # All backend API calls
+│   └── .env.local                       # NEXT_PUBLIC_API_URL
 │
-├── docker-compose.yml              # PostgreSQL only (backend runs locally)
-├── pyproject.toml                  # Python deps managed by uv
-├── .env                            # All backend secrets
-├── requests.http                   # Quick API testing (REST Client)
-├── CLAUDE.md                       # Project context for Claude Code
-└── ARCHITECTURE.md                 # This file
+├── pyproject.toml                       # Python deps managed by uv (incl. datasets)
+├── .env                                 # All backend secrets
+├── requests.http                        # Quick API testing (REST Client)
+├── CLAUDE.md                            # Project context for Claude Code
+└── ARCHITECTURE.md                      # This file
 ```
 
 ---
@@ -235,23 +290,21 @@ OPENAI_API_KEY=
 # LinkedIn
 LINKEDIN_CLIENT_ID=
 LINKEDIN_CLIENT_SECRET=
-LINKEDIN_REDIRECT_URI=http://localhost:8000/auth/callback
+LINKEDIN_REDIRECT_URI=https://3.80.255.79.nip.io/auth/callback
 
-# Tavily (Phase 6)
+# Tavily
 TAVILY_API_KEY=
 
-# PostgreSQL (Docker)
-DATABASE_URL=postgresql://linkedin_agent:password@localhost:5432/linkedin_agent
-POSTGRES_USER=linkedin_agent
-POSTGRES_PASSWORD=password
-POSTGRES_DB=linkedin_agent
+# PostgreSQL (AWS RDS)
+DATABASE_URL=postgresql://user:password@rds-endpoint:5432/linkedin_agent
 
-# ChromaDB
-CHROMA_PERSIST_DIR=./chroma_db
+# Pinecone
+PINECONE_API_KEY=
+PINECONE_INDEX_NAME=linkedin-agent
 
 # App
 SECRET_KEY=
-FRONTEND_URL=http://localhost:3000
+FRONTEND_URL=https://linkedin-agent-blue.vercel.app
 ```
 
 ---
@@ -270,6 +323,9 @@ cd frontend && npm run dev
 
 # Seed knowledge base (first time only)
 uv run python -m backend.rag.ingestion
+
+# Seed LinkedIn examples into Pinecone (first time only — skips if already populated)
+uv run python -m backend.rag.seed_linkedin_examples
 ```
 
 Backend: http://localhost:8000
@@ -285,23 +341,9 @@ API docs: http://localhost:8000/docs
 - ✅ Phase 3 — LangGraph Agent: retrieve → agent → tools loop, InjectedState, conversation history
 - ✅ Phase 4 — Content Tools: draft_post with clarifying questions, user-controlled publish/schedule
 - ✅ Phase 5 — Frontend: Next.js 16, 4 pages, full OAuth flow, chat UI, drafts dashboard
-- 🔄 Phase 6 — Intelligence: Tavily trend search, profile coach mode, analytics
-
----
-
-## Phase 6 — What's Next
-
-### search_trends tool (Tavily)
-Agent searches what's trending in GenAI/tech right now and incorporates
-that into post suggestions. Makes the Content Strategist mode genuinely useful.
-
-### Profile Coach mode
-Systematic profile audit: fetches live LinkedIn profile, compares against
-your target role from memory, returns prioritized rewrite suggestions.
-
-### Analytics tracking
-Fetch engagement data for published posts, store in analytics table,
-agent learns what topics/formats perform best for your audience over time.
+- ✅ Phase 6 — Intelligence: Tavily search_trends, analyze_profile (profile coach), analytics tracking
+- ✅ Phase 7 — Deployment: AWS EC2 + RDS + Pinecone migration + Vercel + SSL via nip.io
+- ✅ Phase 8 — RAG Enrichment: Profile storage system, New Conversation feature, 119 LinkedIn example posts in Pinecone
 
 ---
 
@@ -311,13 +353,15 @@ agent learns what topics/formats perform best for your audience over time.
 |---|---|
 | LangGraph stateful agents | Graph nodes, conditional routing, InjectedState |
 | RAG pipeline | Chunk → embed → store → retrieve → generate |
-| Vector databases | ChromaDB with cosine similarity search |
-| LangChain + Claude tool use | All agent tools with @tool decorator |
+| Vector databases | Pinecone serverless with 4 namespaces |
+| LangChain + Claude tool use | 9 agent tools with @tool decorator |
 | OAuth 2.0 | Full LinkedIn auth flow end-to-end |
 | Full-stack (FastAPI + Next.js) | REST API + React frontend |
 | PostgreSQL + SQLAlchemy | Relational DB with proper models |
-| Docker | Containerized infrastructure |
+| AWS (EC2 + RDS) | Production cloud deployment |
+| Vercel | Frontend hosting with auto-deploy |
+| nginx + SSL | Reverse proxy + Let's Encrypt |
 | GenAI in production | Prompt engineering, context management, RAG |
-| Node.js 22 + Next.js 16 | Latest frontend stack |
+| HuggingFace datasets | Real-world data ingestion pipeline |
 
 This is not a tutorial app. This is a production-grade agent you actually use.

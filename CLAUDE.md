@@ -28,9 +28,10 @@ and PostgreSQL.
 - ✅ Checkpoint 3 — Phase 3 complete: LangGraph agent working. retrieve → agent → tools loop confirmed. InjectedState for user_id. Conversations saved to DB.
 - ✅ Checkpoint 4 — Phase 4 complete: draft_post tool working. Agent asks clarifying Qs before drafting. Conversation history loaded from DB. publish/schedule are user-controlled endpoints.
 - ✅ Checkpoint 5 — Phase 5 complete: Next.js 16 frontend working. Login → chat → drafts → profile flow complete. OAuth redirects to frontend. Grammarly hydration warning is harmless.
+- ✅ Checkpoint 6 — Phases 6–8 complete: Tavily search_trends + profile coach + analyze_profile tool. Migrated from ChromaDB to Pinecone (serverless). Full AWS deployment: EC2 (t2.micro, Ubuntu 24.04) + RDS PostgreSQL + Pinecone + Vercel. Profile storage system (DB + form + LinkedIn ZIP import). New Conversation button. RAG enriched with 119 real high-performing LinkedIn posts (NeuML dataset, linkedin_examples namespace).
 
 ## Current Phase
-Phase 6 — Intelligence (Tavily trend search, profile coach, analytics)
+Phase 8 complete — Production deployed and RAG-enriched.
 
 ## Agent Tools
 1. `get_my_linkedin_profile` — reads live LinkedIn profile
