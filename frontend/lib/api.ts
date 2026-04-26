@@ -24,6 +24,13 @@ export async function sendMessage(message: string) {
   return data as { response: string };
 }
 
+export async function clearConversation() {
+  const { data } = await API.delete("/agent/conversations", {
+    params: { token: getToken() },
+  });
+  return data;
+}
+
 // Posts
 export async function getDrafts() {
   const { data } = await API.get("/posts/drafts", {

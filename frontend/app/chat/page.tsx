@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { sendMessage, getToken, clearToken } from "@/lib/api";
+import { sendMessage, clearConversation, getToken, clearToken } from "@/lib/api";
 import Link from "next/link";
 
 type Message = { role: "user" | "agent"; text: string };
@@ -14,6 +14,7 @@ export default function ChatPage() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,6 +43,16 @@ export default function ChatPage() {
     }
   }
 
+  async function handleNewConversation() {
+    setClearing(true);
+    try {
+      await clearConversation();
+      setMessages([{ role: "agent", text: "Hey Shreyas! Fresh start — what do you want to work on?" }]);
+    } finally {
+      setClearing(false);
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -55,6 +66,13 @@ export default function ChatPage() {
       <nav className="flex items-center justify-between border-b border-gray-800 bg-gray-900 px-6 py-4">
         <h1 className="font-semibold text-white">LinkedIn AI Agent</h1>
         <div className="flex items-center gap-4">
+          <button
+            onClick={handleNewConversation}
+            disabled={clearing}
+            className="text-sm text-gray-400 hover:text-white transition disabled:opacity-40"
+          >
+            {clearing ? "Clearing..." : "New conversation"}
+          </button>
           <Link href="/drafts" className="text-sm text-gray-400 hover:text-white transition">
             Drafts
           </Link>

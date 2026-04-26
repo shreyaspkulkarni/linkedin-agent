@@ -75,3 +75,12 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
     db.commit()
 
     return {"response": response_text, "user_id": str(user.id)}
+
+
+@router.delete("/conversations")
+def clear_conversations(token: str, db: Session = Depends(get_db)):
+    """Clear the user's conversation history so the agent starts fresh."""
+    user = get_current_user(token, db)
+    db.query(Conversation).filter(Conversation.user_id == user.id).delete()
+    db.commit()
+    return {"message": "Conversation history cleared."}
